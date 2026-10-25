@@ -1,0 +1,25 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+
+# YOLO weights
+*.pt
+*.onnx
+
+# Input and Output videos (keep folder structure)
+input_videos/*
+!input_videos/.gitkeep
+output_videos/*
+!output_videos/.gitkeep
+
+# Environments
+venv/
+.env/
+env/
+
+# IDE
+.vscode/
+.idea/
