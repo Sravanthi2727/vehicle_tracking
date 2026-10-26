@@ -47,7 +47,8 @@ def draw_hud(
     Draw a resolution-adaptive translucent HUD banner at the top of the video frame.
     """
     h, w = frame.shape[:2]
-    scale = max(1.0, w / 1280.0)
+    # Smooth scaling down to 0.55 for standard-definition videos (640p/720p/768p)
+    scale = max(0.55, w / 1280.0)
     banner_h = int(round(44 * scale))
 
     # Create translucent dark overlay
@@ -85,10 +86,11 @@ def draw_hud(
         f"Coasted: {coasted_count} | Total Seen: {total_unique}"
     )
     (tw, th), _ = cv2.getTextSize(stats_text, cv2.FONT_HERSHEY_SIMPLEX, font_scale, font_thickness)
+    right_x = max(10, w - tw - int(round(15 * scale)))
     cv2.putText(
         frame,
         stats_text,
-        (max(10, w - tw - int(round(15 * scale))), y_text),
+        (right_x, y_text),
         cv2.FONT_HERSHEY_SIMPLEX,
         font_scale,
         (220, 220, 220),
@@ -136,7 +138,7 @@ def draw_track(
     bounding box, status pill, predicted center crosshair, and trajectory history.
     """
     h, w = frame.shape[:2]
-    scale = max(1.0, w / 1280.0)
+    scale = max(0.55, w / 1280.0)
 
     is_active = (track.state == TrackState.TRACKED)
 
@@ -207,11 +209,17 @@ def draw_track(
 
     pad_x = int(round(5 * scale))
     pad_y = int(round(4 * scale))
-    banner_h = int(round(46 * scale))
+    banner_h = int(round(44 * scale))
 
-    # Position label above bounding box; flip below if near top border
-    label_y2 = y1 - pad_y if y1 - th - (pad_y * 2) > banner_h else y1 + th + (pad_y * 2) + 2
-    label_y1 = label_y2 - th - (pad_y * 2)
+    # Position label above bounding box; flip below HUD if near top border
+    if y1 - th - (pad_y * 2) > banner_h:
+        label_y2 = y1 - pad_y
+        label_y1 = label_y2 - th - (pad_y * 2)
+    else:
+        # Position below HUD banner and within visible bounds
+        label_y1 = max(banner_h + 2, y1 + 2)
+        label_y2 = label_y1 + th + (pad_y * 2)
+
     label_x1 = max(0, x1)
     label_x2 = min(w, label_x1 + tw + (pad_x * 2))
 

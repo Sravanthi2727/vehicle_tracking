@@ -113,3 +113,27 @@ def test_kalman_coasting_prediction_only():
     # Positions should strictly advance forward
     assert pos_history[0][0] < pos_history[1][0] < pos_history[2][0]
     assert pos_history[0][1] < pos_history[1][1] < pos_history[2][1]
+
+
+def test_kalman_variable_dt():
+    """
+    Verify that updating dt via set_dt adjusts the state transition matrix F
+    and scales the forward constant-velocity projection proportionally.
+    """
+    kf = VehicleKalmanFilter(initial_x=100.0, initial_y=100.0, dt=1.0)
+    kf.kf.statePost = np.array([[100.0], [100.0], [5.0], [10.0]], dtype=np.float32)
+
+    # With dt = 1.0, prediction should be (105, 110)
+    px1, py1 = kf.predict()
+    assert pytest.approx(px1, abs=1e-2) == 105.0
+    assert pytest.approx(py1, abs=1e-2) == 110.0
+
+    # Change dt to 2.5: x_new = 105 + 5.0 * 2.5 = 117.5
+    kf.set_dt(2.5)
+    assert pytest.approx(kf.kf.transitionMatrix[0, 2], abs=1e-3) == 2.5
+    assert pytest.approx(kf.kf.transitionMatrix[1, 3], abs=1e-3) == 2.5
+
+    px2, py2 = kf.predict()
+    assert pytest.approx(px2, abs=1e-2) == 117.5
+    assert pytest.approx(py2, abs=1e-2) == 135.0
+

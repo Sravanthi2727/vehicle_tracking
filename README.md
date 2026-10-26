@@ -252,14 +252,21 @@ python -m pytest -v tests
 - `test_kalman_correction`: Confirms state convergence towards observations.
 - `test_kalman_covariance_behavior`: Validates covariance expansion during prediction and reduction upon measurement update.
 - `test_kalman_coasting_prediction_only`: Confirms coasting without mathematical divergence.
+- `test_kalman_variable_dt`: Validates variable frame interval ($\Delta t$) transition scaling.
 - `test_track_creation`: Confirms track initialization and ID assignment.
 - `test_multi_vehicle_association_and_distinct_ids`: Verifies distinct ID maintenance across parallel tracks.
 - `test_one_to_one_matching_guarantee`: Ensures Hungarian assignment prevents double-booking.
 - `test_temporary_missing_detection_coasting_and_recovery`: Verifies track survival and re-acquisition after 3 consecutive missed frames.
 - `test_track_deletion_after_max_age`: Verifies track deletion after $N > \text{max\_age}$ missed frames.
 - `test_empty_detections_handling`: Verifies crash-free handling of frames with zero vehicles.
+- `test_cross_category_association_prevention`: Verifies category separation (e.g. bicycles cannot match trucks).
+- `test_corrupt_and_nan_detection_filtering`: Verifies sanitizer handles NaN and non-positive bounding boxes safely.
+- `test_class_mismatch_penalty_preference`: Verifies Hungarian algorithm prefers same-class matches.
+- `test_module_imports`: Validates module imports and dependency integrity.
 - `test_invalid_video_path_raises_error`: Validates error handling for missing files.
 - `test_synthetic_video_generation_and_reading`: Validates end-to-end video I/O.
+- `test_yolo_real_detection_pipeline`: Validates YOLOv8 weight loading and structured detection output.
+- `test_visualization_rendering`: Validates dual-styling and HUD compositing on video arrays.
 
 ---
 

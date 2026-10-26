@@ -250,3 +250,13 @@ class VehicleKalmanFilter:
         """
         cov = self.kf.errorCovPost
         return float(cov[0, 0] + cov[1, 1])
+
+    def set_dt(self, dt: float) -> None:
+        """
+        Update the time step dt and adjust the state transition matrix F accordingly.
+        Supports variable frame intervals (e.g., variable FPS video streams).
+        """
+        self.dt = float(dt)
+        self.kf.transitionMatrix[0, 2] = self.dt
+        self.kf.transitionMatrix[1, 3] = self.dt
+

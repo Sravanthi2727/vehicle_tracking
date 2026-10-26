@@ -181,6 +181,11 @@ class VehicleTrack:
         """Return the current estimated speed."""
         return self.kf.get_speed()
 
+    def set_dt(self, dt: float) -> None:
+        """Update the time step dt in the underlying Kalman Filter."""
+        self.dt = float(dt)
+        self.kf.set_dt(dt)
+
 
 def compute_iou(box1: Tuple[float, float, float, float], box2: Tuple[float, float, float, float]) -> float:
     """
@@ -210,12 +215,17 @@ class MultiVehicleTracker:
     Coordinates prediction, data association, track correction, and lifecycle management.
     """
 
+    # Grouping to prevent impossible associations (e.g. bicycle matching truck)
+    TWO_WHEELERS = {1, 3}       # bicycle, motorcycle
+    MULTI_WHEELERS = {2, 5, 7}  # car, bus, truck
+
     def __init__(
         self,
         max_age: int = 25,
         min_hits: int = 1,
         max_distance: float = 85.0,
         iou_weight: float = 0.2,
+        class_mismatch_penalty: Optional[float] = None,
         dt: float = 1.0,
     ) -> None:
         """
@@ -226,12 +236,18 @@ class MultiVehicleTracker:
             min_hits: Minimum detections before track is considered confirmed.
             max_distance: Maximum association center distance gate in pixels.
             iou_weight: Weight given to (1 - IoU) in hybrid distance matching.
+            class_mismatch_penalty: Cost penalty added for same-category class mismatch.
             dt: Time step between frames.
         """
         self.max_age: int = int(max_age)
         self.min_hits: int = int(min_hits)
         self.max_distance: float = float(max_distance)
         self.iou_weight: float = float(iou_weight)
+        self.class_mismatch_penalty: float = (
+            float(class_mismatch_penalty)
+            if class_mismatch_penalty is not None
+            else 0.4 * self.max_distance
+        )
         self.dt: float = float(dt)
 
         self.tracks: List[VehicleTrack] = []
@@ -244,14 +260,15 @@ class MultiVehicleTracker:
         Process the current frame detections and update all active vehicle tracks.
 
         Algorithm:
-        1. Predict all existing tracks using their Kalman Filters.
-        2. Compute association cost matrix (Euclidean center distance + IoU penalty).
-        3. Solve global linear assignment using Hungarian matching.
-        4. Apply distance gating to prevent distant false associations.
-        5. Correct matched tracks with their respective detections.
-        6. Coast unmatched tracks in prediction-only mode.
-        7. Spawn new tracks for unmatched detections.
-        8. Remove expired tracks whose missed frames exceed max_age.
+        1. Sanitize incoming detections (filter NaN, Inf, non-positive dimensions).
+        2. Predict all existing tracks using their Kalman Filters.
+        3. Compute association cost matrix with topological category and IoU penalties.
+        4. Solve global linear assignment using Hungarian matching.
+        5. Apply distance & validity gating to prevent false associations.
+        6. Correct matched tracks with their respective detections.
+        7. Coast unmatched tracks in prediction-only mode.
+        8. Spawn new tracks for unmatched detections.
+        9. Remove expired tracks whose missed frames exceed max_age.
 
         Args:
             detections: List of Detection objects from the vehicle detector.
@@ -260,6 +277,22 @@ class MultiVehicleTracker:
             List of currently active tracks to visualize.
         """
         self.frame_count += 1
+
+        # Step 0: Sanitize detections to guard against NaN/Inf or corrupt geometry
+        valid_detections: List[Detection] = []
+        for det in detections:
+            if det is None:
+                continue
+            x1, y1, x2, y2 = det.bbox
+            if not (np.isfinite(x1) and np.isfinite(y1) and np.isfinite(x2) and np.isfinite(y2)):
+                continue
+            if det.width <= 0.0 or det.height <= 0.0:
+                continue
+            cx, cy = det.center
+            if not (np.isfinite(cx) and np.isfinite(cy)):
+                continue
+            valid_detections.append(det)
+        detections = valid_detections
 
         # Step 1: Predict all active tracks
         for track in self.tracks:
@@ -278,16 +311,29 @@ class MultiVehicleTracker:
 
             for t_idx, track in enumerate(self.tracks):
                 tx, ty = track.predicted_center
+                t_is_2w = track.class_id in self.TWO_WHEELERS
                 for d_idx, det in enumerate(detections):
+                    d_is_2w = det.class_id in self.TWO_WHEELERS
+
+                    # Disallow cross-category matches (e.g. bicycle cannot match truck)
+                    if t_is_2w != d_is_2w:
+                        cost_matrix[t_idx, d_idx] = 1e5
+                        continue
+
                     dx, dy = det.center
                     dist = float(np.hypot(tx - dx, ty - dy))
+
+                    # Soft penalty for mismatched class within compatible category
+                    class_penalty = (
+                        self.class_mismatch_penalty if track.class_id != det.class_id else 0.0
+                    )
 
                     # Optional IoU penalty (1 - IoU)
                     if self.iou_weight > 0.0:
                         iou = compute_iou(track.predicted_bbox, det.bbox)
-                        cost = dist + self.iou_weight * (1.0 - iou) * self.max_distance
+                        cost = dist + class_penalty + self.iou_weight * (1.0 - iou) * self.max_distance
                     else:
-                        cost = dist
+                        cost = dist + class_penalty
 
                     cost_matrix[t_idx, d_idx] = cost
 
@@ -297,8 +343,12 @@ class MultiVehicleTracker:
             else:
                 row_ind, col_ind = self._greedy_assignment(cost_matrix)
 
-            # Step 4: Validate matches against maximum gating distance
+            # Step 4: Validate matches against maximum gating distance & category validity
             for t_idx, d_idx in zip(row_ind, col_ind):
+                # Reject pairs blocked by category separation
+                if cost_matrix[t_idx, d_idx] >= 1e4:
+                    continue
+
                 # Check pure Euclidean distance gate
                 tx, ty = self.tracks[t_idx].predicted_center
                 dx, dy = detections[d_idx].center

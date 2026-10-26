@@ -163,3 +163,132 @@ def test_empty_detections_handling():
     tracks = tracker.update([])
     assert len(tracks) == 0
     assert tracker.total_unique_vehicles == 0
+
+
+def test_cross_category_association_prevention():
+    """
+    Verify that an incompatible vehicle category (e.g. bicycle, class 1)
+    never matches or hijacks an existing four-wheeler track (e.g. truck, class 7)
+    even when placed at identical coordinates.
+    """
+    tracker = MultiVehicleTracker(max_age=10, max_distance=80.0)
+
+    # Frame 1: Truck track initialized
+    truck_det = Detection(
+        bbox=(90.0, 90.0, 150.0, 150.0),
+        center=(120.0, 120.0),
+        width=60.0,
+        height=60.0,
+        class_id=7,
+        class_name="truck",
+        confidence=0.9,
+    )
+    tracker.update([truck_det])
+    assert len(tracker.tracks) == 1
+    assert tracker.tracks[0].class_name == "truck"
+    truck_id = tracker.tracks[0].track_id
+
+    # Frame 2: Only a bicycle detection appears at the same coordinate
+    bike_det = Detection(
+        bbox=(110.0, 110.0, 130.0, 130.0),
+        center=(120.0, 120.0),
+        width=20.0,
+        height=20.0,
+        class_id=1,
+        class_name="bicycle",
+        confidence=0.85,
+    )
+    active_tracks = tracker.update([bike_det])
+
+    # Must result in 2 tracks: the truck coasts, while the bicycle spawns a new distinct track
+    assert len(active_tracks) == 2
+    truck_track = next(t for t in active_tracks if t.track_id == truck_id)
+    assert truck_track.state == TrackState.COASTED
+    assert truck_track.class_name == "truck"
+
+    new_bike_track = next(t for t in active_tracks if t.track_id != truck_id)
+    assert new_bike_track.state == TrackState.TRACKED
+    assert new_bike_track.class_name == "bicycle"
+
+
+def test_corrupt_and_nan_detection_filtering():
+    """
+    Verify that corrupt detections with NaN coordinates or non-positive dimensions
+    are sanitized without crashing the tracker or Hungarian optimization.
+    """
+    tracker = MultiVehicleTracker(max_age=5, max_distance=50.0)
+    import numpy as np
+
+    # Frame 1: Initialize valid track
+    tracker.update([make_detection(100.0, 100.0)])
+    assert len(tracker.tracks) == 1
+
+    # Frame 2: Pass corrupt detections (NaN bbox, zero width, etc.)
+    corrupt_dets = [
+        Detection(
+            bbox=(float("nan"), 100.0, 120.0, 120.0),
+            center=(float("nan"), 110.0),
+            width=20.0,
+            height=20.0,
+            class_id=2,
+            class_name="car",
+            confidence=0.5,
+        ),
+        Detection(
+            bbox=(100.0, 100.0, 100.0, 120.0),
+            center=(100.0, 110.0),
+            width=0.0,  # Zero width
+            height=20.0,
+            class_id=2,
+            class_name="car",
+            confidence=0.5,
+        ),
+    ]
+
+    # Tracker must survive gracefully without raising ValueError
+    tracks = tracker.update(corrupt_dets)
+    assert len(tracks) == 1
+    assert tracks[0].state == TrackState.COASTED
+
+
+def test_class_mismatch_penalty_preference():
+    """
+    Verify that when two detections are at similar distances from a track,
+    the Hungarian algorithm prefers the detection matching the track's class.
+    """
+    tracker = MultiVehicleTracker(max_age=10, max_distance=60.0)
+
+    # Frame 1: Track born as car at (100, 100)
+    tracker.update([make_detection(100.0, 100.0, class_name="car")])
+    assert tracker.tracks[0].class_id == 2
+
+    # Frame 2: Two detections:
+    # A car at distance 15px (115, 100)
+    # A truck at distance 10px (110, 100)
+    det_car = Detection(
+        bbox=(95.0, 90.0, 135.0, 110.0),
+        center=(115.0, 100.0),
+        width=40.0,
+        height=20.0,
+        class_id=2,
+        class_name="car",
+        confidence=0.9,
+    )
+    det_truck = Detection(
+        bbox=(90.0, 85.0, 130.0, 115.0),
+        center=(110.0, 100.0),
+        width=40.0,
+        height=30.0,
+        class_id=7,
+        class_name="truck",
+        confidence=0.9,
+    )
+
+    tracks = tracker.update([det_car, det_truck])
+    assert len(tracks) == 2
+
+    # Track 1 should associate with the car detection due to class penalty on truck
+    track1 = next(t for t in tracks if t.track_id == 1)
+    assert track1.class_name == "car"
+    assert pytest.approx(track1.current_center[0], abs=2.0) == 115.0
+

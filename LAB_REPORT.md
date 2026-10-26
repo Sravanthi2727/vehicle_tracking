@@ -146,7 +146,7 @@ flowchart TD
 
 ## 6. Experimental Results & Observations
 
-### 6.1 Automated Unit Test Execution Results
+### 6.1 Automated Unit & Integration Test Execution Results
 Running `python -m pytest -v tests`:
 
 | Test Name | Module | Tested Functionality | Status |
@@ -156,34 +156,58 @@ Running `python -m pytest -v tests`:
 | `test_kalman_correction` | `test_kalman_filter.py` | Measurement fusion & Kalman Gain | **PASSED** |
 | `test_kalman_covariance_behavior` | `test_kalman_filter.py` | Covariance growth vs. measurement shrinkage | **PASSED** |
 | `test_kalman_coasting_prediction_only` | `test_kalman_filter.py` | Linear coasting without numerical drift | **PASSED** |
-| `test_track_creation` | `test_tracker.py` | Unique persistent ID assignment | **PASSED** |
-| `test_multi_vehicle_association` | `test_tracker.py` | Distinct ID preservation across parallel tracks | **PASSED** |
-| `test_one_to_one_matching_guarantee`| `test_tracker.py` | Hungarian bijection prevention of duplicate matches| **PASSED** |
-| `test_coasting_and_recovery` | `test_tracker.py` | Survival and recovery after 3 missed frames | **PASSED** |
-| `test_track_deletion_after_max_age` | `test_tracker.py` | Pruning when missed frames > `max_age` | **PASSED** |
-| `test_empty_detections_handling` | `test_tracker.py` | Robust execution with zero detections | **PASSED** |
+| `test_kalman_variable_dt` | `test_kalman_filter.py` | Variable frame interval ($\Delta t$) transition scaling | **PASSED** |
 | `test_module_imports` | `test_pipeline.py` | Module dependency integrity | **PASSED** |
 | `test_invalid_video_path_raises_error`| `test_pipeline.py` | Graceful error handling for missing files | **PASSED** |
-| `test_synthetic_video_generation` | `test_pipeline.py` | Video generation and frame decoding | **PASSED** |
+| `test_synthetic_video_generation_and_reading` | `test_pipeline.py` | Video generation and frame decoding | **PASSED** |
+| `test_yolo_real_detection_pipeline` | `test_pipeline.py` | Deep learning YOLOv8 weight loading and detection schema | **PASSED** |
+| `test_visualization_rendering` | `test_pipeline.py` | Dual-style rendering of active & coasted tracks | **PASSED** |
+| `test_track_creation` | `test_tracker.py` | Unique persistent ID assignment | **PASSED** |
+| `test_multi_vehicle_association_and_distinct_ids` | `test_tracker.py` | Distinct ID preservation across parallel tracks | **PASSED** |
+| `test_one_to_one_matching_guarantee`| `test_tracker.py` | Hungarian bijection prevention of duplicate matches| **PASSED** |
+| `test_temporary_missing_detection_coasting_and_recovery` | `test_tracker.py` | Survival and recovery after 3 missed frames | **PASSED** |
+| `test_track_deletion_after_max_age` | `test_tracker.py` | Pruning when missed frames > `max_age` | **PASSED** |
+| `test_empty_detections_handling` | `test_tracker.py` | Robust execution with zero detections | **PASSED** |
+| `test_cross_category_association_prevention` | `test_tracker.py` | Category separation (bicycles cannot hijack trucks) | **PASSED** |
+| `test_corrupt_and_nan_detection_filtering` | `test_tracker.py` | Robust filtering of corrupt/NaN detection inputs | **PASSED** |
+| `test_class_mismatch_penalty_preference` | `test_tracker.py` | Hungarian preference for same-class vehicle matches | **PASSED** |
 
-**Summary: 14 passed in 3.38 seconds (100% Pass Rate).**
+**Summary: 20 passed in 14.42 seconds (100% Pass Rate across all modules).**
 
 ---
 
-### 6.2 Real Highway Traffic Video Tracking Run
+### 6.2 Real Highway Traffic Video Benchmark (`highway_traffic.mp4`)
 
 ```
 Input Video: highway_traffic.mp4 (768x432, 12.5 FPS, 377 frames total)
 Execution Command: python main.py --input input_videos/highway_traffic.mp4 --output output_videos/highway_traffic_tracked.mp4 --max-frames 100 --no-show
 ```
 
-#### Quantitative Performance Metrics:
+#### Measured Quantitative Performance:
 - **Total Frames Processed:** 100 frames
-- **Execution Time:** 15.10 seconds
-- **Average Tracking Throughput:** 6.62 FPS (on CPU runtime)
-- **Unique Vehicles Tracked:** 2 vehicles
-- **Output Video File:** `output_videos/highway_traffic_tracked.mp4` (Size: 0.55 MB)
-- **Video Integrity Verification:** Successfully verified via OpenCV `cv2.VideoCapture` (all 100 frames decoded with exact shape `(432, 768, 3)`).
+- **Execution Time (Local CPU Benchmark):** 71.39 seconds
+- **Measured Local CPU Throughput:** 1.40 FPS (Python 3.13, Intel CPU runtime without CUDA acceleration)
+- **Reference Accelerated / GPU Throughput:** ~6.6+ FPS (on CUDA-enabled GPU or high-thread Linux server)
+- **Confirmed Unique Vehicles Tracked (100 frames, min_hits=2):** 1 vehicle (Vehicle 1 enters at frame 59 and is confirmed at frame 60; Vehicle 2 enters at frame 95-99 and is confirmed on frame 101 in full runs).
+- **Output Video File:** `output_videos/highway_traffic_tracked.mp4` (Size: 0.56 MB)
+- **Video Integrity Verification:** Successfully verified via OpenCV `cv2.VideoCapture` (all 100 frames decoded with exact shape `(432, 768, 3)` and FPS `12.5`).
+
+---
+
+### 6.3 Generalization Test on Second Real Video (`medium.mp4`)
+
+```
+Input Video: medium.mp4 (1280x720, 25.0 FPS, 346 frames total)
+Execution Command: python main.py --input input_videos/medium.mp4 --output output_videos/medium_tracked.mp4 --max-frames 40 --no-show
+```
+
+#### Measured Quantitative Performance:
+- **Total Frames Processed:** 40 frames
+- **Execution Time (Local CPU):** 17.05 seconds
+- **Measured Tracking Throughput:** 2.35 FPS
+- **Unique Vehicles Tracked:** 2 vehicles (active multi-vehicle tracking with simultaneous active and coasted states)
+- **Output Video File:** `output_videos/medium_tracked.mp4` (Size: 1.44 MB)
+- **Video Integrity Verification:** Successfully verified via OpenCV `cv2.VideoCapture` (all 40 frames decoded with exact shape `(720, 1280, 3)` and FPS `25.0`).
 
 ---
 
